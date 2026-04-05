@@ -979,8 +979,11 @@ async function analyzeStock() {
             throw new Error(errMsg);
         }
         const klineData = await klineRes.json();
-        if (!klineData || !Array.isArray(klineData)) throw new Error('K线数据不完整');
-        stockData = klineData;
+        // kline 接口返回 {data:[], kline:[], ...} 或直接是数组
+        const klineArr = Array.isArray(klineData) ? klineData
+            : (klineData.data || klineData.kline);
+        if (!klineArr || !Array.isArray(klineArr)) throw new Error('K线数据不完整');
+        stockData = klineArr;
             
             const holdingsForStock = holdings.filter(h => h.code === stockCode);
             
