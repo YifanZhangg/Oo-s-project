@@ -956,27 +956,31 @@ async function analyzeStock() {
     try {
         let stockData, quote;
         
-        // 1) 行情快照（报价）
-        const quoteRes = await apiFetch(`/api/stock/full?code=${stockCode}&market=${stockType}`);
+        // 1) 并行获取行情快照 + K线数据
+        const [quoteRes, klineRes] = await Promise.all([
+            apiFetch(`/api/stock/full?code=${stockCode}&market=${stockType}`),
+            apiFetch(`/api/stock/kline?code=${stockCode}&interval=${currentKlinePeriod}&market=${stockType}`)
+        ]);
+        
+        // 处理报价数据
         if (!quoteRes.ok) {
             let errMsg = `请求失败(${quoteRes.status})`;
             try { const e = await quoteRes.json(); if (e && e.error) errMsg = e.error; } catch (_) {}
             throw new Error(errMsg);
         }
         const quoteData = await quoteRes.json();
-        if (!quoteData || !quoteData.quote) throw new Error('行情数据不完整');
-        quote = quoteData.quote;
+        if (!quoteData) throw new Error('行情数据不完整');
+        quote = quoteData;
         
-        // 2) K线历史数据
-        const klineRes = await apiFetch(`/api/stock/kline?code=${stockCode}&interval=${currentKlinePeriod}&market=${stockType}`);
+        // 处理K线数据
         if (!klineRes.ok) {
             let errMsg = `K线请求失败(${klineRes.status})`;
             try { const e = await klineRes.json(); if (e && e.error) errMsg = e.error; } catch (_) {}
             throw new Error(errMsg);
         }
         const klineData = await klineRes.json();
-        if (!klineData || !Array.isArray(klineData.kline)) throw new Error('K线数据不完整');
-        stockData = klineData.kline;
+        if (!klineData || !Array.isArray(klineData)) throw new Error('K线数据不完整');
+        stockData = klineData;
             
             const holdingsForStock = holdings.filter(h => h.code === stockCode);
             

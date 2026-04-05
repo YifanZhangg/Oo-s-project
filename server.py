@@ -1065,7 +1065,7 @@ def get_stock_full():
                 "pb":            pb_val,
                 "peRatio":       pe_val,
             }
-            return jsonify({"quote": quote, "kline": d.get("data", [])})
+            return jsonify(quote)
 
     # ---- US stocks via OpenBB Package directly ----
     if not stock_code.isdigit():
@@ -1140,13 +1140,13 @@ def get_stock_full():
                             "yearLow":  to_float_2(r.get('year_low')),
                             "provider":  "yfinance",
                         })
-                    return jsonify({"quote": quote, "kline": kline})
+                    return jsonify(quote)
             except Exception as e:
                 return jsonify({"error": f"OpenBB failed for {stock_code}: {e}"}), 502
         quote, kline, err = _yf_quote_and_kline(stock_code, days=days)
         if err or quote is None or kline is None:
             return jsonify({"error": f"获取数据失败：{err or 'no data'}"}), 502
-        return jsonify({"quote": quote, "kline": kline})
+        return jsonify(quote)
 
     # ---- Crypto via OpenBB Package ----
     if market == "crypto":
