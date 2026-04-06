@@ -22,6 +22,9 @@ import random, re, json, os, time, hashlib, subprocess
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# 应用根目录（兼容 Docker 容器内运行）
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Shared thread pool for OpenBB calls
 executor = ThreadPoolExecutor(max_workers=4)
 
@@ -2398,10 +2401,11 @@ def ta_report():
         if not os.environ.get("OPENAI_API_KEY") and not oai_key:
             return jsonify({"error": "未配置 OPENAI_API_KEY"}), 400
 
-        venv_py = os.path.join(os.path.dirname(__file__), ".venv_tradingagents", "bin", "python")
-        runner  = os.path.join(os.path.dirname(__file__), "tradingagents_runner.py")
+        # TradingAgents 专用虚拟环境
+        venv_py = os.path.join(os.path.dirname(__file__), ".venv_tradingagents", "Scripts" if sys.platform == "win32" else "bin", "python.exe" if sys.platform == "win32" else "python")
         if not os.path.exists(venv_py):
-            return jsonify({"error": "TradingAgents 未安装"}), 500
+            return jsonify({"error": "TradingAgents 虚拟环境未安装"}), 500
+        runner  = os.path.join(os.path.dirname(__file__), "tradingagents_runner.py")
         if not os.path.exists(runner):
             return jsonify({"error": "runner 脚本缺失"}), 500
 
@@ -2455,18 +2459,18 @@ def ta_report():
 @app.route("/api/ai/tradingagents/health")
 def ta_health():
     try:
-        venv_py  = os.path.join(os.path.dirname(__file__), ".venv_tradingagents", "bin", "python")
         runner   = os.path.join(os.path.dirname(__file__), "tradingagents_runner.py")
+        venv_py  = os.path.join(os.path.dirname(__file__), ".venv_tradingagents", "Scripts" if sys.platform == "win32" else "bin", "python.exe" if sys.platform == "win32" else "python")
         env_key  = os.environ.get("OPENAI_API_KEY")
         dot_key  = _read_dotenv("OPENAI_API_KEY")
         return jsonify({
             "success": True,
             "data": {
-                "server_python": os.sys.version.split(" ")[0],
+                "server_python": sys.version.split(" ")[0],
                 "has_openai_key_env":   bool(env_key),
                 "has_openai_key_dotenv": bool(dot_key),
-                "ta_venv_exists":  os.path.exists(venv_py),
                 "ta_runner_exists": os.path.exists(runner),
+                "ta_venv_exists": os.path.exists(venv_py),
                 "env_dotenv_match": bool(env_key and dot_key and env_key == dot_key),
                 "env_key_fp":  _fingerprint_secret(env_key),
                 "dotenv_key_fp": _fingerprint_secret(dot_key),
@@ -2904,7 +2908,7 @@ def watchlist_indicators():
 # ============================================================
 @app.route("/vendor/chart.js")
 def vendor_chartjs():
-    p = os.path.join(os.path.dirname(__file__), "node_modules", "chart.js", "dist",
+    p = os.path.join(BASE_DIR, "node_modules", "chart.js", "dist",
                      "chart.umd.min.js")
     if os.path.exists(p):
         return send_from_directory(os.path.dirname(p), "chart.umd.min.js")
@@ -2922,16 +2926,30 @@ def favicon():
 
 @app.route("/")
 def index():
-    resp = send_from_directory(".", "index.html")
+    full_path = os.path.join(BASE_DIR, "index.html")
+    print(f"[DEBUG] index route: BASE_DIR={BASE_DIR}, full_path={full_path}, exists={os.path.exists(full_path)}, size={os.path.getsize(full_path) if os.path.exists(full_path) else 'N/A'}")
+    resp = send_from_directory(BASE_DIR, "index.html")
     try:
         resp.headers["Cache-Control"] = "no-store"
     except:
         pass
     return resp
 
+@app.route("/debug-path")
+def debug_path():
+    """调试端点：确认 Flask 的 BASE_DIR 和实际文件路径"""
+    return jsonify({
+        "BASE_DIR": BASE_DIR,
+        "cwd": os.getcwd(),
+        "index_exists": os.path.exists(os.path.join(BASE_DIR, "index.html")),
+        "index_size": os.path.getsize(os.path.join(BASE_DIR, "index.html")) if os.path.exists(os.path.join(BASE_DIR, "index.html")) else None,
+        "script_exists": os.path.exists(os.path.join(BASE_DIR, "script.js")),
+        "chart_exists": os.path.exists(os.path.join(BASE_DIR, "chart.js")),
+    })
+
 @app.route("/<path:path>")
 def static_files(path):
-    resp = send_from_directory(".", path)
+    resp = send_from_directory(BASE_DIR, path)
     try:
         if path.endswith(".js") or path.endswith(".css") or path.endswith(".html"):
             resp.headers["Cache-Control"] = "no-store"
@@ -2952,4 +2970,4 @@ if __name__ == "__main__":
 |  冲突接口: 双格式兼容 (server_openBB + server.py)           |
 +==============================================================+
     ''')
-    app.run(host="0.0.0.0", port=3000, debug=True, use_reloader=False, threaded=True)
+    app.run(host="0.0.0.0", port=3000, debug=False, use_reloader=False, threaded=True)

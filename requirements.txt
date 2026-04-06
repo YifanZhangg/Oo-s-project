@@ -5,3 +5,4 @@ akshare
 pandas
 dashscope
 yfinance
+openbb
