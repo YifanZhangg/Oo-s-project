@@ -842,6 +842,227 @@ body {
     margin-bottom: 20px;
 }
 
+.news-market-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+.news-market-tab {
+    padding: 8px 14px;
+    border: 1px solid rgba(0, 212, 255, 0.25);
+    border-radius: 10px;
+    background: rgba(10, 25, 47, 0.6);
+    color: #ccd6f6;
+    cursor: pointer;
+}
+
+.news-market-tab.active {
+    background: rgba(0, 212, 255, 0.18);
+    border-color: rgba(0, 212, 255, 0.55);
+    color: #00d4ff;
+}
+
+.news-search-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+.news-search-input {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(0, 212, 255, 0.25);
+    background: rgba(10, 25, 47, 0.6);
+    color: #ccd6f6;
+}
+
+.news-pagination {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: flex-end;
+    margin: 10px 0;
+    flex-wrap: wrap;
+}
+
+.news-page-btn {
+    padding: 6px 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(0, 212, 255, 0.25);
+    background: rgba(10, 25, 47, 0.6);
+    color: #ccd6f6;
+    cursor: pointer;
+}
+
+.news-page-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.news-page-info {
+    color: #8892b0;
+    font-size: 0.9rem;
+}
+
+.news-item-link {
+    color: #00d4ff;
+    text-decoration: none;
+}
+
+.news-item-link:hover {
+    text-decoration: underline;
+}
+
+.watchlist-tabs {
+    display: flex;
+    gap: 10px;
+    margin: 14px 0 12px;
+    flex-wrap: wrap;
+}
+
+.watchlist-tab {
+    padding: 8px 14px;
+    border: 1px solid rgba(0, 212, 255, 0.25);
+    border-radius: 10px;
+    background: rgba(10, 25, 47, 0.6);
+    color: #ccd6f6;
+    cursor: pointer;
+}
+
+.watchlist-tab.active {
+    background: rgba(0, 212, 255, 0.18);
+    border-color: rgba(0, 212, 255, 0.55);
+    color: #00d4ff;
+}
+
+.watchlist-tab.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.watchlist-search-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+}
+
+.watchlist-search-input {
+    flex: 1;
+    min-width: 240px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(0, 212, 255, 0.25);
+    background: rgba(10, 25, 47, 0.6);
+    color: #ccd6f6;
+}
+
+.watchlist-hint {
+    color: #8892b0;
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+}
+
+.watchlist-results h3,
+.watchlist-saved h3 {
+    margin: 14px 0 10px;
+    color: #ccd6f6;
+}
+
+.watchlist-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.watchlist-saved-tabs {
+    display: flex;
+    gap: 10px;
+    margin: 10px 0 12px;
+    flex-wrap: wrap;
+}
+
+.watchlist-saved-tab {
+    padding: 6px 12px;
+    border: 1px solid rgba(0, 212, 255, 0.18);
+    border-radius: 10px;
+    background: rgba(10, 25, 47, 0.55);
+    color: #ccd6f6;
+    cursor: pointer;
+}
+
+.watchlist-saved-tab.active {
+    background: rgba(0, 212, 255, 0.16);
+    border-color: rgba(0, 212, 255, 0.55);
+    color: #00d4ff;
+}
+
+.watchlist-saved-tab.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.watchlist-item {
+    background: rgba(10, 25, 47, 0.75);
+    border: 1px solid rgba(0, 212, 255, 0.18);
+    border-radius: 14px;
+    padding: 12px 14px;
+}
+
+.watchlist-item-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.watchlist-item-title {
+    font-weight: 700;
+    color: #fff;
+}
+
+.watchlist-item-sub {
+    color: #8892b0;
+    font-size: 0.9rem;
+    margin-top: 2px;
+}
+
+.watchlist-item-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.watchlist-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.watchlist-metric {
+    background: rgba(0, 212, 255, 0.06);
+    border: 1px solid rgba(0, 212, 255, 0.12);
+    border-radius: 12px;
+    padding: 8px 10px;
+}
+
+.watchlist-metric .k {
+    color: #8892b0;
+    font-size: 0.8rem;
+}
+
+.watchlist-metric .v {
+    color: #ccd6f6;
+    font-weight: 700;
+    margin-top: 2px;
+}
+
 .news-header h2 {
     color: #00d4ff;
 }
@@ -1347,6 +1568,19 @@ body {
     color: #fff;
     flex: 1;
     padding-right: 15px;
+}
+
+.related-news-title-link {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #fff;
+    flex: 1;
+    padding-right: 15px;
+    text-decoration: none;
+}
+
+.related-news-title-link:hover {
+    text-decoration: underline;
 }
 
 .related-news-source {

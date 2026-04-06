@@ -988,20 +988,17 @@ async function analyzeStock() {
             const holdingsForStock = holdings.filter(h => h.code === stockCode);
             
             let newsData = null;
-            let financialData = null;
             
             await Promise.all([
-                fetchRelatedNews(stockCode, quote.name).then(data => newsData = data),
-                fetchFinancialData(stockCode, quote.name).then(data => financialData = data)
+                fetchRelatedNews(stockCode, quote.name, stockType).then(data => newsData = data)
             ]);
             
             window.currentNewsData = newsData;
-            window.currentFinancialData = financialData;
             
             // 获取管理团队数据
             await fetchManagementData(stockCode);
             
-            await loadEnhancedAnalysis(stockCode, quote, holdingsForStock, newsData, financialData);
+            await loadEnhancedAnalysis(stockCode, quote, holdingsForStock, newsData, null);
         
         const latest = stockData[stockData.length - 1];
         const prev = stockData[stockData.length - 2];
@@ -1088,17 +1085,19 @@ async function analyzeStock() {
     }
 }
 
-async function fetchRelatedNews(stockCode, stockName) {
+async function fetchRelatedNews(stockCode, stockName, market) {
     try {
-        const response = await apiFetch(`/api/stock/related-news?code=${stockCode}&name=${encodeURIComponent(stockName)}`);
+        const response = await apiFetch(`/api/stock/related-news?code=${stockCode}&market=${market}&name=${encodeURIComponent(stockName)}`);
         const data = await response.json();
         
         if (data.success && data.data) {
             renderRelatedNews(data.data);
+            return data.data;
         }
     } catch (error) {
         console.error('获取相关新闻失败:', error);
     }
+    return null;
 }
 
 async function fetchStockEvents(stockCode, stockName) {
@@ -1124,10 +1123,14 @@ function renderRelatedNews(news) {
     
     news.forEach((item, index) => {
         const isHidden = index >= visibleCount;
+        const hasUrl = !!(item.url && String(item.url).trim());
+        const titleHtml = hasUrl
+            ? `<a class="related-news-title-link" href="${item.url}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">${item.title}</a>`
+            : `<div class="related-news-title">${item.title}</div>`;
         html += `
-            <div class="related-news-item ${isHidden ? 'hidden-news' : ''}" id="newsItem-${item.id}" onclick="toggleNewsDetail(${item.id})">
+            <div class="related-news-item ${isHidden ? 'hidden-news' : ''}" id="newsItem-${item.id}" onclick="toggleRelatedNewsDetail(${item.id})">
                 <div class="related-news-header">
-                    <div class="related-news-title">${item.title}</div>
+                    ${titleHtml}
                     <span class="related-news-source">${item.source}</span>
                 </div>
                 <div class="related-news-meta">
@@ -1135,7 +1138,8 @@ function renderRelatedNews(news) {
                     <span class="related-news-type">${item.type}</span>
                 </div>
                 <div class="related-news-detail" id="newsDetail-${item.id}">
-                    ${item.detail}
+                    <div>${item.detail || ''}</div>
+                    ${hasUrl ? `<a class="related-news-link" href="${item.url}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()">查看详情</a>` : ''}
                 </div>
             </div>
         `;
@@ -1177,7 +1181,7 @@ function toggleMoreNews() {
     }
 }
 
-function toggleNewsDetail(newsId) {
+function toggleRelatedNewsDetail(newsId) {
     const detailEl = document.getElementById(`newsDetail-${newsId}`);
     if (detailEl) {
         detailEl.classList.toggle('show');
@@ -1993,9 +1997,20 @@ function getAIRecommendation() {
     strategySection.appendChild(container.firstChild);
 }
 
+let currentNewsMarket = 'cn';
+let currentNewsKeyword = '';
+let currentNewsPage = 1;
+const newsPageSize = 30;
+let currentWatchlistMarket = 'cn';
+let currentSavedWatchlistMarket = 'cn';
+const watchlistStorageKey = 'watchlist_v1';
+
 function switchTab(tab) {
     const tabs = document.querySelectorAll('.nav-tab');
     tabs.forEach(t => t.classList.remove('active'));
+
+    const searchSection = document.querySelector('.search-section');
+    if (searchSection) searchSection.classList.remove('hidden');
     
     const analysisSection = document.getElementById('analysisSection');
     const newsSection = document.getElementById('newsSection');
@@ -2019,7 +2034,9 @@ function switchTab(tab) {
     } else if (tab === 'news') {
         tabs[1].classList.add('active');
         newsSection.classList.remove('hidden');
-        loadNews();
+        if (searchSection) searchSection.classList.add('hidden');
+        initNewsUIOnce();
+        loadNewsPage(1);
     } else if (tab === 'stockPicker') {
         tabs[2].classList.add('active');
         stockPickerSection.classList.remove('hidden');
@@ -3054,9 +3071,48 @@ function viewPKLeaderboard(pkId) {
     section.scrollIntoView({ behavior: 'smooth' });
 }
 
-async function loadNews() {
+function initNewsUIOnce() {
+    const input = document.getElementById('newsKeyword');
+    if (!input || input.dataset.bound === '1') return;
+    input.dataset.bound = '1';
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            searchNews();
+        }
+    });
+}
+
+function switchNewsMarket(market) {
+    currentNewsMarket = market;
+    currentNewsPage = 1;
+    const tabs = document.querySelectorAll('.news-market-tab');
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.market === market));
+    loadNewsPage(1);
+}
+
+function refreshNews() {
+    loadNewsPage(currentNewsPage);
+}
+
+function searchNews() {
+    const input = document.getElementById('newsKeyword');
+    currentNewsKeyword = (input && input.value ? input.value : '').trim();
+    loadNewsPage(1);
+}
+
+function _newsEndpointForMarket(market) {
+    if (market === 'us') return '/api/news/us';
+    return '/api/news';
+}
+
+async function loadNewsPage(page) {
     const newsList = document.getElementById('newsList');
-    
+    const endpoint = _newsEndpointForMarket(currentNewsMarket);
+    const q = encodeURIComponent(currentNewsKeyword || '');
+    const url = `${endpoint}?market=${encodeURIComponent(currentNewsMarket)}&q=${q}&page=${encodeURIComponent(page)}&pageSize=${encodeURIComponent(newsPageSize)}`;
+
+    currentNewsPage = page;
+
     try {
         newsList.innerHTML = `
             <div class="loading">
@@ -3064,58 +3120,83 @@ async function loadNews() {
                 <p>正在加载新闻...</p>
             </div>
         `;
-        
-        const response = await apiFetch('/api/news');
+
+        const response = await apiFetch(url);
         const data = await response.json();
-        
-        if (data.success && data.data) {
-            let html = '';
-            data.data.forEach((news, index) => {
-                const categoryText = {
-                    'market': '市场',
-                    'policy': '政策',
-                    'commodity': '商品',
-                    'industry': '行业',
-                    'global': '国际',
-                    'forex': '外汇'
-                }[news.category] || news.category;
-                
-                html += `
-                    <div class="news-item ${news.impact}" id="news-${index}">
-                        <div class="news-header" onclick="toggleNewsDetail(${index})">
-                            <div class="news-title">${news.title}</div>
-                            <div class="news-expand-icon" id="expand-icon-${index}">▼</div>
-                        </div>
-                        <div class="news-meta">
-                            <span class="news-category">${categoryText}</span>
-                            <span>${news.time}</span>
-                            <span class="news-source">来源：${news.source || '未知'}</span>
-                        </div>
-                        <div class="news-detail" id="news-detail-${index}">
-                            ${news.detail || '暂无详情'}
-                        </div>
-                    </div>
-                `;
-            });
-            newsList.innerHTML = html;
+
+        if (!data.success) {
+            throw new Error(data.error || '加载新闻失败');
         }
+
+        const items = Array.isArray(data.data) ? data.data : [];
+        const total = Number.isFinite(data.total) ? data.total : items.length;
+        renderMarketNews(items);
+        renderNewsPagination(total, page);
     } catch (error) {
         console.error('加载新闻失败:', error);
         newsList.innerHTML = '<p style="color: #ff4757; text-align: center; padding: 30px;">加载新闻失败</p>';
+        renderNewsPagination(0, page);
     }
 }
 
-function toggleNewsDetail(index) {
-    const detail = document.getElementById(`news-detail-${index}`);
-    const icon = document.getElementById(`expand-icon-${index}`);
-    
-    if (detail.classList.contains('expanded')) {
-        detail.classList.remove('expanded');
-        icon.textContent = '▼';
-    } else {
-        detail.classList.add('expanded');
-        icon.textContent = '▲';
-    }
+function renderMarketNews(items) {
+    const newsList = document.getElementById('newsList');
+    if (!newsList) return;
+
+    const categoryMap = {
+        market: '市场',
+        policy: '政策',
+        commodity: '商品',
+        industry: '行业',
+        global: '国际',
+        forex: '外汇',
+        news: '新闻'
+    };
+
+    let html = '';
+    items.forEach((news) => {
+        const title = news.title || '';
+        const url = news.url || '';
+        const time = news.time || '';
+        const source = news.source || '未知';
+        const categoryText = categoryMap[news.category] || news.category || '新闻';
+        const detail = news.detail || news.summary || news.text || '';
+        const impact = news.impact || '';
+
+        html += `
+            <div class="news-item ${impact}">
+                <div class="news-header">
+                    ${url ? `<a class="news-title news-item-link" href="${url}" target="_blank" rel="noopener noreferrer">${title}</a>` : `<div class="news-title">${title}</div>`}
+                </div>
+                <div class="news-meta">
+                    <span class="news-category">${categoryText}</span>
+                    <span>${time}</span>
+                    <span class="news-source">来源：${source}</span>
+                </div>
+                ${detail ? `<div class="news-detail expanded">${detail}</div>` : ''}
+            </div>
+        `;
+    });
+
+    newsList.innerHTML = html || '<p style="color: #8892b0; text-align: center; padding: 30px;">暂无新闻</p>';
+}
+
+function renderNewsPagination(total, page) {
+    const top = document.getElementById('newsPaginationTop');
+    const bottom = document.getElementById('newsPaginationBottom');
+    const pageCount = total > 0 ? Math.ceil(total / newsPageSize) : 1;
+    const cur = Math.min(Math.max(page, 1), pageCount);
+
+    const html = `
+        <span class="news-page-info">共 ${total} 条，第 ${cur}/${pageCount} 页</span>
+        <button class="news-page-btn" onclick="loadNewsPage(1)" ${cur <= 1 ? 'disabled' : ''}>首页</button>
+        <button class="news-page-btn" onclick="loadNewsPage(${cur - 1})" ${cur <= 1 ? 'disabled' : ''}>上一页</button>
+        <button class="news-page-btn" onclick="loadNewsPage(${cur + 1})" ${cur >= pageCount ? 'disabled' : ''}>下一页</button>
+        <button class="news-page-btn" onclick="loadNewsPage(${pageCount})" ${cur >= pageCount ? 'disabled' : ''}>末页</button>
+    `;
+
+    if (top) top.innerHTML = html;
+    if (bottom) bottom.innerHTML = html;
 }
 
 async function getAIAnalysis() {
@@ -3724,6 +3805,9 @@ function appNavigate(view) {
     expandGroupForView(view);
     setActiveSidebarItem(view);
     persistAppSettings({ ...appSettings, lastView: view });
+
+    const searchSection = document.querySelector('.search-section');
+    if (searchSection) searchSection.classList.remove('hidden');
     
     if (view === 'overview') {
         const el = document.getElementById('overviewSection');
@@ -3734,6 +3818,10 @@ function appNavigate(view) {
     if (view === 'watchlist') {
         const el = document.getElementById('watchlistSection');
         if (el) el.classList.remove('hidden');
+        if (searchSection) searchSection.classList.add('hidden');
+        initWatchlistUIOnce();
+        switchSavedWatchlistMarket(currentSavedWatchlistMarket);
+        renderSavedWatchlist();
         return;
     }
     
@@ -3775,6 +3863,274 @@ function appNavigate(view) {
     if (typeof switchTab === 'function') {
         switchTab(view);
     }
+}
+
+function initWatchlistUIOnce() {
+    const input = document.getElementById('watchlistKeyword');
+    if (input && input.dataset.bound !== '1') {
+        input.dataset.bound = '1';
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                watchlistSearch();
+            }
+        });
+    }
+
+    const results = document.getElementById('watchlistResultsList');
+    if (results && results.dataset.bound !== '1') {
+        results.dataset.bound = '1';
+        results.addEventListener('click', (e) => {
+            const btn = e.target && e.target.closest ? e.target.closest('.wl-add-btn') : null;
+            if (!btn) return;
+            const market = btn.dataset.market || 'cn';
+            const code = btn.dataset.code || '';
+            const name = btn.dataset.name || '';
+            if (!code) return;
+            handleWatchlistAdd(market, code, name);
+        });
+    }
+}
+
+function switchWatchlistMarket(market) {
+    if (market === 'hk' || market === 'crypto') {
+        const hint = document.getElementById('watchlistHint');
+        if (hint) hint.textContent = '港股和加密货币暂不支持搜索与加入自选。';
+        return;
+    }
+    currentWatchlistMarket = market;
+    const tabs = document.querySelectorAll('.watchlist-tab');
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.market === market));
+    const hint = document.getElementById('watchlistHint');
+    if (hint) hint.textContent = market === 'cn' ? 'A股数据源：AkShare' : '美股数据源：OpenBB（搜索）';
+}
+
+function switchSavedWatchlistMarket(market) {
+    if (market === 'hk' || market === 'crypto') {
+        return;
+    }
+    currentSavedWatchlistMarket = market;
+    const tabs = document.querySelectorAll('.watchlist-saved-tab');
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.market === market));
+    renderSavedWatchlist();
+}
+
+function getSavedWatchlist() {
+    try {
+        const raw = localStorage.getItem(watchlistStorageKey);
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveWatchlist(items) {
+    localStorage.setItem(watchlistStorageKey, JSON.stringify(items));
+}
+
+function addToWatchlist(item) {
+    try {
+        const list = getSavedWatchlist();
+        const key = `${item.market}:${item.code}`;
+        if (list.some(x => `${x.market}:${x.code}` === key)) {
+            const hint = document.getElementById('watchlistHint');
+            if (hint) hint.textContent = `已在自选中：${item.code}`;
+            return;
+        }
+        list.unshift({
+            market: item.market,
+            code: item.code,
+            name: item.name,
+            indicators: item.indicators || null,
+            updatedAt: new Date().toISOString()
+        });
+        saveWatchlist(list);
+        currentSavedWatchlistMarket = item.market;
+        const tabs = document.querySelectorAll('.watchlist-saved-tab');
+        tabs.forEach(t => t.classList.toggle('active', t.dataset.market === currentSavedWatchlistMarket));
+        const hint = document.getElementById('watchlistHint');
+        if (hint) hint.textContent = `已加入自选：${item.code}`;
+        renderSavedWatchlist();
+    } catch (e) {
+        const hint = document.getElementById('watchlistHint');
+        if (hint) hint.textContent = `加入自选失败：${e && e.message ? e.message : 'localStorage 不可用'}`;
+    }
+}
+
+function handleWatchlistAdd(market, code, name) {
+    const indicators = window[`__wl_ind_${market}_${code}`] || null;
+    addToWatchlist({ market, code, name, indicators });
+}
+
+function removeFromWatchlist(market, code) {
+    const list = getSavedWatchlist().filter(x => !(x.market === market && x.code === code));
+    saveWatchlist(list);
+    renderSavedWatchlist();
+}
+
+function formatMetric(v) {
+    if (v === null || v === undefined || v === '') return '--';
+    if (typeof v === 'number' && !Number.isFinite(v)) return '--';
+    return String(v);
+}
+
+function renderWatchlistItem(container, item, mode) {
+    const ind = item.indicators || {};
+    const price = ind.price != null ? ind.price : ind.last_price;
+    const changePercent = ind.changePercent != null ? ind.changePercent : ind.change_percent;
+    const rsi = ind.rsi14 != null ? ind.rsi14 : (ind.rsi && ind.rsi.value);
+    const macdTrend = ind.macdTrend != null ? ind.macdTrend : (ind.macd && ind.macd.trend);
+    const ma20 = ind.ma20 != null ? ind.ma20 : (ind.ema && ind.ema.ema20);
+    const ma60 = ind.ma60 != null ? ind.ma60 : (ind.ema && ind.ema.ema60);
+
+    const title = `${item.name || '--'} (${item.code})`;
+    const sub = item.market === 'cn' ? 'A股' : item.market === 'us' ? '美股' : item.market;
+    const btnHtml = mode === 'result'
+        ? `<button class="btn-secondary wl-add-btn" data-market="${item.market}" data-code="${item.code}" data-name="${String(item.name || '').replaceAll('"','&quot;')}">加入自选</button>`
+        : `<button class="btn-secondary" onclick="refreshSingleWatchlist('${item.market}','${item.code}')">刷新</button>
+           <button class="btn-secondary" onclick="removeFromWatchlist('${item.market}','${item.code}')">移除</button>`;
+
+    container.innerHTML += `
+        <div class="watchlist-item" id="wl-${item.market}-${item.code}">
+            <div class="watchlist-item-head">
+                <div>
+                    <div class="watchlist-item-title">${title}</div>
+                    <div class="watchlist-item-sub">${sub}</div>
+                </div>
+                <div class="watchlist-item-actions">
+                    ${btnHtml}
+                </div>
+            </div>
+            <div class="watchlist-metrics">
+                <div class="watchlist-metric"><div class="k">现价</div><div class="v" id="wl-price-${item.market}-${item.code}">${formatMetric(price)}</div></div>
+                <div class="watchlist-metric"><div class="k">涨跌幅</div><div class="v" id="wl-chg-${item.market}-${item.code}">${formatMetric(changePercent != null ? `${changePercent}%` : '--')}</div></div>
+                <div class="watchlist-metric"><div class="k">RSI(14)</div><div class="v" id="wl-rsi-${item.market}-${item.code}">${formatMetric(rsi)}</div></div>
+                <div class="watchlist-metric"><div class="k">MACD</div><div class="v" id="wl-macd-${item.market}-${item.code}">${formatMetric(macdTrend)}</div></div>
+                <div class="watchlist-metric"><div class="k">MA20/EMA20</div><div class="v" id="wl-ma20-${item.market}-${item.code}">${formatMetric(ma20)}</div></div>
+                <div class="watchlist-metric"><div class="k">MA60/EMA60</div><div class="v" id="wl-ma60-${item.market}-${item.code}">${formatMetric(ma60)}</div></div>
+            </div>
+        </div>
+    `;
+}
+
+async function fetchIndicatorsFor(market, code, name) {
+    try {
+        const resp = await apiFetch(`/api/watchlist/indicators?market=${encodeURIComponent(market)}&code=${encodeURIComponent(code)}&name=${encodeURIComponent(name || '')}`);
+        const data = await resp.json();
+        if (!data.success) {
+            return null;
+        }
+        return data.data;
+    } catch {
+        return null;
+    }
+}
+
+async function applyIndicatorsToDom(market, code, indicators) {
+    const priceEl = document.getElementById(`wl-price-${market}-${code}`);
+    const chgEl = document.getElementById(`wl-chg-${market}-${code}`);
+    const rsiEl = document.getElementById(`wl-rsi-${market}-${code}`);
+    const macdEl = document.getElementById(`wl-macd-${market}-${code}`);
+    const ma20El = document.getElementById(`wl-ma20-${market}-${code}`);
+    const ma60El = document.getElementById(`wl-ma60-${market}-${code}`);
+
+    if (!indicators) return;
+    const price = indicators.price != null ? indicators.price : indicators.last_price;
+    const changePercent = indicators.changePercent != null ? indicators.changePercent : indicators.change_percent;
+    const rsi = indicators.rsi14 != null ? indicators.rsi14 : (indicators.rsi && indicators.rsi.value);
+    const macdTrend = indicators.macdTrend != null ? indicators.macdTrend : (indicators.macd && indicators.macd.trend);
+    const ma20 = indicators.ma20 != null ? indicators.ma20 : (indicators.ema && indicators.ema.ema20);
+    const ma60 = indicators.ma60 != null ? indicators.ma60 : (indicators.ema && indicators.ema.ema60);
+
+    if (priceEl) priceEl.textContent = formatMetric(price);
+    if (chgEl) chgEl.textContent = formatMetric(changePercent != null ? `${changePercent}%` : '--');
+    if (rsiEl) rsiEl.textContent = formatMetric(rsi);
+    if (macdEl) macdEl.textContent = formatMetric(macdTrend);
+    if (ma20El) ma20El.textContent = formatMetric(ma20);
+    if (ma60El) ma60El.textContent = formatMetric(ma60);
+}
+
+async function watchlistSearch() {
+    const input = document.getElementById('watchlistKeyword');
+    const q = (input && input.value ? input.value : '').trim();
+    const hint = document.getElementById('watchlistHint');
+    const listEl = document.getElementById('watchlistResultsList');
+    if (!q) {
+        if (hint) hint.textContent = '请输入搜索关键词或代码。';
+        return;
+    }
+    if (currentWatchlistMarket === 'hk' || currentWatchlistMarket === 'crypto') {
+        if (hint) hint.textContent = '该市场暂不支持。';
+        return;
+    }
+    if (listEl) listEl.innerHTML = '<div style="color:#8892b0;padding:10px;">正在搜索...</div>';
+    try {
+        const resp = await apiFetch(`/api/watchlist/search?market=${encodeURIComponent(currentWatchlistMarket)}&q=${encodeURIComponent(q)}`);
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || '搜索失败');
+        const results = Array.isArray(data.data) ? data.data : [];
+        if (listEl) listEl.innerHTML = '';
+        if (!results.length) {
+            if (listEl) listEl.innerHTML = '<div style="color:#8892b0;padding:10px;">暂无结果</div>';
+            return;
+        }
+        results.slice(0, 10).forEach(r => {
+            window[`__wl_ind_${currentWatchlistMarket}_${r.code}`] = null;
+            renderWatchlistItem(listEl, { market: currentWatchlistMarket, code: r.code, name: r.name, indicators: null }, 'result');
+        });
+        for (const r of results.slice(0, 10)) {
+            const ind = await fetchIndicatorsFor(currentWatchlistMarket, r.code, r.name);
+            window[`__wl_ind_${currentWatchlistMarket}_${r.code}`] = ind;
+            await applyIndicatorsToDom(currentWatchlistMarket, r.code, ind);
+        }
+    } catch (e) {
+        if (listEl) listEl.innerHTML = '<div style="color:#ff4757;padding:10px;">搜索失败</div>';
+        if (hint) hint.textContent = e && e.message ? e.message : '搜索失败';
+    }
+}
+
+function renderSavedWatchlist() {
+    const listEl = document.getElementById('watchlistSavedList');
+    if (!listEl) return;
+    const all = getSavedWatchlist();
+    const list = all.filter(x => x.market === currentSavedWatchlistMarket);
+    listEl.innerHTML = '';
+    if (!list.length) {
+        listEl.innerHTML = '<div style="color:#8892b0;padding:10px;">暂无自选股票</div>';
+        return;
+    }
+    list.forEach(item => {
+        renderWatchlistItem(listEl, item, 'saved');
+    });
+    list.forEach(async (item) => {
+        if (item.indicators) {
+            await applyIndicatorsToDom(item.market, item.code, item.indicators);
+        }
+    });
+}
+
+async function refreshSingleWatchlist(market, code) {
+    const list = getSavedWatchlist();
+    const item = list.find(x => x.market === market && x.code === code);
+    if (!item) return;
+    const ind = await fetchIndicatorsFor(market, code, item.name);
+    if (!ind) return;
+    item.indicators = ind;
+    item.updatedAt = new Date().toISOString();
+    saveWatchlist(list);
+    await applyIndicatorsToDom(market, code, ind);
+}
+
+async function refreshWatchlistIndicators() {
+    const list = getSavedWatchlist();
+    for (const item of list) {
+        const ind = await fetchIndicatorsFor(item.market, item.code, item.name);
+        if (!ind) continue;
+        item.indicators = ind;
+        item.updatedAt = new Date().toISOString();
+        await applyIndicatorsToDom(item.market, item.code, ind);
+    }
+    saveWatchlist(list);
 }
 
 async function diagnoseTradingAgents() {

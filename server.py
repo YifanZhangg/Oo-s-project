@@ -1273,9 +1273,291 @@ def generate_financial_news():
 
 @app.route("/api/news")
 def get_news():
-    news = generate_financial_news()
-    return jsonify({"success": True, "data": news,
-                    "updateTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+    market = (request.args.get("market") or "cn").strip().lower()
+    q = (request.args.get("q") or "").strip()
+    page = int(request.args.get("page", 1))
+    page_size = int(request.args.get("pageSize", 30))
+    page = max(page, 1)
+    page_size = max(min(page_size, 100), 1)
+
+    if market == "cn":
+        news = []
+        try:
+            import akshare as ak
+            from datetime import datetime as _dt
+
+            today = _dt.now().strftime("%Y-%m-%d")
+
+            def _append_em(df):
+                if df is None or len(df) <= 0:
+                    return
+                for _, row in df.iterrows():
+                    title = str(row.get("新闻标题", "") or "").strip()
+                    if not title:
+                        continue
+                    ts = str(row.get("发布时间", "") or "").strip()
+                    if ts and not str(ts).startswith(today):
+                        continue
+                    url = str(row.get("新闻链接", "") or "").strip()
+                    src = str(row.get("文章来源", "") or "").strip() or "东方财富"
+                    detail = str(row.get("新闻内容", "") or "").strip()
+                    news.append({
+                        "id": random.randint(1000, 9999),
+                        "title": title,
+                        "category": "market",
+                        "time": ts or "今天",
+                        "impact": "neutral",
+                        "source": src,
+                        "detail": detail,
+                        "url": url,
+                    })
+
+            base_keywords = ["A股", "市场", "全部"]
+            for kw in base_keywords:
+                try:
+                    _append_em(ak.stock_news_em(symbol=kw))
+                except Exception:
+                    pass
+
+            if q:
+                try:
+                    _append_em(ak.stock_news_em(symbol=q))
+                except Exception:
+                    pass
+
+            try:
+                cx_df = ak.stock_news_main_cx()
+                if cx_df is not None and len(cx_df) > 0:
+                    for _, row in cx_df.iterrows():
+                        url = str(row.get("url", "") or "").strip()
+                        title = str(row.get("summary", "") or "").strip()
+                        tag = str(row.get("tag", "") or "").strip()
+                        if not title:
+                            continue
+                        if today not in url:
+                            continue
+                        news.append({
+                            "id": random.randint(1000, 9999),
+                            "title": title,
+                            "category": "market",
+                            "time": today,
+                            "impact": "neutral",
+                            "source": tag or "财新",
+                            "detail": "",
+                            "url": url,
+                        })
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"[!] CN news failed: {e}")
+
+        if not news:
+            news = generate_financial_news()
+    else:
+        news = generate_financial_news()
+
+    if news:
+        uniq = {}
+        for it in news:
+            key = (it.get("url") or it.get("title") or "").strip()
+            if not key:
+                continue
+            if key in uniq:
+                continue
+            uniq[key] = it
+        news = list(uniq.values())
+
+    if q:
+        ql = q.lower()
+        news = [
+            n for n in news
+            if ql in (str(n.get("title", "")) + " " + str(n.get("detail", "")) + " " + str(n.get("source", ""))).lower()
+        ]
+    total = len(news)
+    start = (page - 1) * page_size
+    end = start + page_size
+    return jsonify({
+        "success": True,
+        "data": news[start:end],
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+        "updateTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+
+
+@app.route("/api/news/us")
+def get_news_us():
+    q = (request.args.get("q") or "").strip()
+    page = int(request.args.get("page", 1))
+    page_size = int(request.args.get("pageSize", 30))
+    page = max(page, 1)
+    page_size = max(min(page_size, 50), 1)
+
+    symbols = [
+        "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "JPM",
+        "AMD", "NFLX", "INTC", "ORCL", "COIN", "BAC", "WMT"
+    ]
+
+    obb = _get_obb()
+    source_used = "openbb"
+    if not obb:
+        source_used = "fallback"
+
+    items = []
+    if q:
+        q_sym = q.strip().upper()
+        if q_sym and q_sym not in symbols and len(q_sym) <= 10 and all(c.isalnum() or c in "-._" for c in q_sym):
+            symbols = [q_sym] + symbols
+
+    if obb:
+        for sym in symbols:
+            try:
+                ob_news, nerr = _ob_call(lambda: obb.news.company(symbol=sym, limit=30, provider="yfinance"), timeout=12)
+                if nerr or not ob_news or not getattr(ob_news, "results", None):
+                    continue
+                for r in ob_news.results:
+                    d = r.model_dump() if hasattr(r, "model_dump") else {}
+                    date_raw = d.get("date")
+                    time_str = "刚刚"
+                    published_ts = 0
+                    try:
+                        if date_raw:
+                            dt = datetime.fromisoformat(str(date_raw).replace("Z", "+00:00"))
+                            published_ts = int(dt.timestamp())
+                            age = datetime.now(dt.tzinfo) - dt
+                            mins = int(age.total_seconds() // 60)
+                            if mins < 60:
+                                time_str = f"{mins}分钟前" if mins > 0 else "刚刚"
+                            elif mins < 24 * 60:
+                                time_str = f"{mins // 60}小时前"
+                            else:
+                                time_str = f"{mins // (24 * 60)}天前"
+                    except:
+                        time_str = str(date_raw) if date_raw else "刚刚"
+
+                    url = d.get("url") or ""
+                    title = d.get("title") or ""
+                    if not title:
+                        continue
+                    items.append({
+                        "id": d.get("id") or random.randint(10000, 99999),
+                        "title": title,
+                        "source": d.get("source") or "OpenBB",
+                        "category": "news",
+                        "impact": "neutral",
+                        "time": time_str,
+                        "detail": d.get("summary") or d.get("excerpt") or d.get("text") or "",
+                        "url": url,
+                        "_ts": published_ts,
+                        "_date": str(date_raw) if date_raw else "",
+                    })
+            except Exception as e:
+                print(f"[!] OpenBB US news failed for {sym}: {e}")
+    else:
+        source_used = "fallback"
+
+    uniq = {}
+    for it in items:
+        key = (it.get("url") or it.get("title") or "").strip()
+        if not key:
+            continue
+        if key in uniq:
+            continue
+        uniq[key] = it
+    items = list(uniq.values())
+
+    items.sort(key=lambda x: int(x.get("_ts") or 0), reverse=True)
+
+    today_items = []
+    today = datetime.now().date()
+    for it in items:
+        ds = (it.get("_date") or "").strip()
+        if not ds:
+            continue
+        try:
+            dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+            if dt.astimezone().date() == today:
+                today_items.append(it)
+        except:
+            continue
+    if today_items:
+        items = today_items
+
+    if q:
+        ql = q.lower()
+        items = [it for it in items if ql in (str(it.get("title","")) + " " + str(it.get("detail","")) + " " + str(it.get("source",""))).lower()]
+
+    if not items:
+        source_used = "fallback"
+        try:
+            from curl_cffi import requests as creq
+            import xml.etree.ElementTree as ET
+            from email.utils import parsedate_to_datetime
+
+            for sym in symbols[:10]:
+                r = creq.get(
+                    f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={sym}&region=US&lang=en-US",
+                    timeout=10,
+                    impersonate="chrome",
+                )
+                if getattr(r, "status_code", 0) >= 400:
+                    continue
+                root = ET.fromstring(r.text or "")
+                for item in root.findall(".//item"):
+                    title = (item.findtext("title") or "").strip()
+                    link = (item.findtext("link") or "").strip()
+                    pub = (item.findtext("pubDate") or "").strip()
+                    src = (item.findtext("source") or "").strip() or "Yahoo Finance"
+                    if not title or not link:
+                        continue
+                    time_str = "刚刚"
+                    try:
+                        dt = parsedate_to_datetime(pub) if pub else None
+                        if dt:
+                            age = datetime.now(dt.tzinfo) - dt
+                            mins = int(age.total_seconds() // 60)
+                            if mins < 60:
+                                time_str = f"{mins}分钟前" if mins > 0 else "刚刚"
+                            elif mins < 24 * 60:
+                                time_str = f"{mins // 60}小时前"
+                            else:
+                                time_str = f"{mins // (24 * 60)}天前"
+                    except Exception:
+                        time_str = pub or "刚刚"
+                    items.append({
+                        "id": random.randint(10000, 99999),
+                        "title": title,
+                        "source": src,
+                        "category": "news",
+                        "impact": "neutral",
+                        "time": time_str,
+                        "detail": "",
+                        "url": link,
+                    })
+                    if len(items) >= 400:
+                        break
+                if len(items) >= 400:
+                    break
+
+            if q:
+                ql = q.lower()
+                items = [it for it in items if ql in (str(it.get("title","")) + " " + str(it.get("source",""))).lower()]
+        except Exception as e:
+            print(f"[!] US news rss fallback failed: {e}")
+
+    total = len(items)
+    start = (page - 1) * page_size
+    end = start + page_size
+    return jsonify({
+        "success": True,
+        "data": [{k: v for k, v in it.items() if not str(k).startswith("_")} for it in items[start:end]],
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+        "source": source_used,
+        "updateTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
 
 
 # ============================================================
@@ -1305,6 +1587,114 @@ def get_related_news(stock_code, stock_name, market="cn"):
         return [{"id": 1, "title": f"{stock_name} 相关新闻暂无数据", "source": "系统",
                  "type": "新闻", "time": "刚刚", "detail": "暂无数据"}]
 
+    def _yahoo_rss_items(symbol, limit=5):
+        try:
+            from curl_cffi import requests as creq
+            r = creq.get(
+                f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US",
+                timeout=10,
+                impersonate="chrome",
+            )
+            if getattr(r, "status_code", 0) >= 400:
+                return []
+            xml_text = r.text or ""
+        except Exception:
+            try:
+                import requests
+                r = requests.get(
+                    f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US",
+                    timeout=10,
+                )
+                r.raise_for_status()
+                xml_text = r.text or ""
+            except Exception:
+                return []
+
+        try:
+            import xml.etree.ElementTree as ET
+            from email.utils import parsedate_to_datetime
+
+            root = ET.fromstring(xml_text)
+            out = []
+            for item in root.findall(".//item"):
+                title = (item.findtext("title") or "").strip()
+                link = (item.findtext("link") or "").strip()
+                pub = (item.findtext("pubDate") or "").strip()
+                src = (item.findtext("source") or "").strip() or "Yahoo Finance"
+                if not title or not link:
+                    continue
+                time_str = "刚刚"
+                try:
+                    dt = parsedate_to_datetime(pub) if pub else None
+                    if dt:
+                        age = datetime.now(dt.tzinfo) - dt
+                        mins = int(age.total_seconds() // 60)
+                        if mins < 60:
+                            time_str = f"{mins}分钟前" if mins > 0 else "刚刚"
+                        elif mins < 24 * 60:
+                            time_str = f"{mins // 60}小时前"
+                        else:
+                            time_str = f"{mins // (24 * 60)}天前"
+                except Exception:
+                    time_str = pub or "刚刚"
+
+                out.append({
+                    "id": random.randint(10000, 99999),
+                    "title": title,
+                    "source": src,
+                    "type": "新闻",
+                    "time": time_str,
+                    "detail": "",
+                    "url": link,
+                })
+                if len(out) >= int(limit or 5):
+                    break
+            return out
+        except Exception:
+            return []
+
+    if market == "us":
+        obb = _get_obb()
+        if obb:
+            try:
+                sym = format_symbol(stock_code)
+                ob_news, nerr = _ob_call(lambda: obb.news.company(symbol=sym, limit=5, provider="yfinance"), timeout=12)
+                items = []
+                if not nerr and ob_news and getattr(ob_news, "results", None):
+                    for r in ob_news.results[:5]:
+                        d = r.model_dump() if hasattr(r, "model_dump") else {}
+                        date_raw = d.get("date")
+                        time_str = "刚刚"
+                        try:
+                            if date_raw:
+                                dt = datetime.fromisoformat(str(date_raw).replace("Z", "+00:00"))
+                                age = datetime.now(dt.tzinfo) - dt
+                                mins = int(age.total_seconds() // 60)
+                                if mins < 60:
+                                    time_str = f"{mins}分钟前" if mins > 0 else "刚刚"
+                                elif mins < 24 * 60:
+                                    time_str = f"{mins // 60}小时前"
+                                else:
+                                    time_str = f"{mins // (24 * 60)}天前"
+                        except:
+                            time_str = str(date_raw) if date_raw else "刚刚"
+                        items.append({
+                            "id": d.get("id") or random.randint(10000, 99999),
+                            "title": d.get("title") or "",
+                            "source": d.get("source") or "OpenBB",
+                            "type": "新闻",
+                            "time": time_str,
+                            "detail": d.get("summary") or d.get("excerpt") or d.get("text") or "",
+                            "url": d.get("url") or "",
+                        })
+                if items:
+                    return items
+            except Exception as e:
+                print(f"[!] OpenBB US related news failed for {stock_code}: {e}")
+        rss_items = _yahoo_rss_items(stock_code, limit=5)
+        if rss_items:
+            return rss_items
+
     # ---- 美股 / 港股 / 加密货币：yfinance ----
     try:
         import yfinance as yf
@@ -1326,7 +1716,7 @@ def get_related_news(stock_code, stock_name, market="cn"):
                     if age.seconds < 3600:
                         time_str = f"{age.seconds // 60}分钟前"
                     elif age.days < 1:
-                        time_str = f"{age.hours}小时前"
+                        time_str = f"{age.seconds // 3600}小时前"
                     else:
                         time_str = f"{age.days}天前"
                 news_list.append({
@@ -1341,6 +1731,10 @@ def get_related_news(stock_code, stock_name, market="cn"):
             return news_list
     except Exception as e:
         print(f"[!] US stock news failed for {stock_code}: {e}")
+    if market == "us":
+        rss_items = _yahoo_rss_items(stock_code, limit=5)
+        if rss_items:
+            return rss_items
     return [{"id": 1, "title": f"{stock_name}({stock_code}) 相关新闻暂无数据", "source": "系统",
              "type": "新闻", "time": "刚刚", "detail": "暂无数据"}]
 
@@ -1351,7 +1745,20 @@ def api_related_news():
     name   = request.args.get("name", code or "")
     if not code:
         return jsonify({"error": "请提供股票代码"}), 400
-    return jsonify({"success": True, "data": get_related_news(code, name, market),
+    data = get_related_news(code, name, market)
+    if not data:
+        if market == "us":
+            q = str(code).strip().upper()
+            url = f"https://finance.yahoo.com/quote/{q}/news"
+            data = [
+                {"id": i + 1, "title": f"{q} 相关新闻（数据源暂不可用）", "source": "系统",
+                 "type": "新闻", "time": "刚刚", "detail": "请稍后重试或点击查看 Yahoo Finance 新闻页。", "url": url}
+                for i in range(5)
+            ]
+        else:
+            data = [{"id": 1, "title": f"{name}({code}) 相关新闻暂无数据", "source": "系统",
+                     "type": "新闻", "time": "刚刚", "detail": "暂无数据"}]
+    return jsonify({"success": True, "data": data,
                     "updateTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
 
 
@@ -2230,6 +2637,269 @@ def get_picker():
 
 
 # ============================================================
+# 自选管理：搜索与技术指标
+# ============================================================
+_cn_code_name_cache = {"ts": 0, "data": None}
+_cn_spot_cache = {"ts": 0, "data": None}
+
+def _load_cn_code_name():
+    import time as _time
+    if _cn_code_name_cache["data"] is not None and (_time.time() - _cn_code_name_cache["ts"]) < 6 * 3600:
+        return _cn_code_name_cache["data"]
+    import akshare as ak
+    df, err = _ob_call(lambda: ak.stock_info_a_code_name(), timeout=15)
+    if err or df is None:
+        if _cn_code_name_cache["data"] is not None:
+            return _cn_code_name_cache["data"]
+        raise RuntimeError(err or "akshare stock_info_a_code_name failed")
+    rows = []
+    for _, row in df.iterrows():
+        rows.append({"code": str(row.get("code", "")).strip(), "name": str(row.get("name", "")).strip()})
+    _cn_code_name_cache["data"] = rows
+    _cn_code_name_cache["ts"] = _time.time()
+    return rows
+
+def _load_cn_spot_basic():
+    import time as _time
+    if _cn_spot_cache["data"] is not None and (_time.time() - _cn_spot_cache["ts"]) < 10 * 60:
+        return _cn_spot_cache["data"]
+    import akshare as ak
+    df, err = _ob_call(lambda: ak.stock_zh_a_spot_em(), timeout=20)
+    if err or df is None:
+        if _cn_spot_cache["data"] is not None:
+            return _cn_spot_cache["data"]
+        raise RuntimeError(err or "akshare stock_zh_a_spot_em failed")
+    code_col = "代码" if "代码" in df.columns else "code"
+    name_col = "名称" if "名称" in df.columns else "name"
+    rows = []
+    for _, row in df.iterrows():
+        rows.append({"code": str(row.get(code_col, "")).strip(), "name": str(row.get(name_col, "")).strip()})
+    _cn_spot_cache["data"] = rows
+    _cn_spot_cache["ts"] = _time.time()
+    return rows
+
+def _calc_ema(series, period):
+    if not series or period <= 0:
+        return []
+    k = 2 / (period + 1)
+    ema = []
+    for i, v in enumerate(series):
+        if v is None:
+            ema.append(None)
+            continue
+        if i == 0 or ema[-1] is None:
+            ema.append(v)
+        else:
+            ema.append(v * k + ema[-1] * (1 - k))
+    return ema
+
+def _calc_macd_simple(closes, fast=12, slow=26, signal=9):
+    closes = [to_float(c) for c in closes if c is not None]
+    if len(closes) < slow + signal:
+        return None
+    ema_fast = _calc_ema(closes, fast)
+    ema_slow = _calc_ema(closes, slow)
+    macd_line = [(f - s) if f is not None and s is not None else None for f, s in zip(ema_fast, ema_slow)]
+    macd_vals = [m for m in macd_line if m is not None]
+    sig_line = _calc_ema(macd_vals, signal)
+    hist = macd_vals[-1] - sig_line[-1] if sig_line else None
+    trend = "bullish" if hist is not None and hist > 0 else "bearish" if hist is not None else "unknown"
+    return {"histogram": to_float_2(hist), "trend": trend}
+
+@app.route("/api/watchlist/search")
+def watchlist_search():
+    market = (request.args.get("market") or "cn").strip().lower()
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"success": False, "error": "缺少 q"}), 400
+    if market == "cn":
+        try:
+            q2 = q.strip()
+            rows = []
+            try:
+                rows = _load_cn_code_name()
+            except Exception:
+                rows = _load_cn_spot_basic()
+            out = []
+            if q2.isdigit():
+                if len(q2) == 6:
+                    out.append({"code": q2, "name": q2})
+                for r in rows:
+                    if r["code"].startswith(q2):
+                        out.append(r)
+                        if len(out) >= 10:
+                            break
+            else:
+                for r in rows:
+                    if q2 in r["name"]:
+                        out.append(r)
+                        if len(out) >= 10:
+                            break
+            return jsonify({"success": True, "data": out})
+        except Exception as e:
+            return jsonify({"success": False, "error": f"A股搜索失败: {e}"}), 502
+
+    if market == "us":
+        obb = _get_obb()
+        if not obb:
+            return jsonify({"success": False, "error": "OpenBB 不可用"}), 503
+        try:
+            q_raw = q.strip()
+            q_sym = q_raw.upper()
+            is_symbol = bool(q_raw and len(q_raw) <= 10 and all(c.isalnum() or c in "-._" for c in q_sym))
+
+            out = []
+            last_err = None
+            for provider in ["nasdaq", "sec", ""]:
+                try:
+                    if provider:
+                        r = obb.equity.search(query=q_raw, is_symbol=is_symbol, provider=provider)
+                    else:
+                        r = obb.equity.search(query=q_raw, is_symbol=is_symbol)
+                    for it in (r.results or [])[:10]:
+                        d = it.model_dump() if hasattr(it, "model_dump") else {}
+                        code = str(d.get("symbol", "")).strip().upper()
+                        name2 = str(d.get("name", "")).strip()
+                        if not code:
+                            continue
+                        out.append({"code": code, "name": name2 or code})
+                    if out:
+                        break
+                except Exception as e:
+                    last_err = str(e)
+
+            if out:
+                uniq = {}
+                for it in out:
+                    uniq[it["code"]] = it
+                return jsonify({"success": True, "data": list(uniq.values())[:10]})
+
+            if is_symbol:
+                qt_df, qerr = _ob_call(lambda: obb.equity.price.quote(q_sym, provider="yfinance").to_dataframe(), timeout=12)
+                if not qerr and qt_df is not None and hasattr(qt_df, "iloc") and len(qt_df) > 0:
+                    row = qt_df.iloc[0]
+                    name2 = row.get("name") or row.get("short_name") or row.get("long_name") or q_sym
+                    return jsonify({"success": True, "data": [{"code": q_sym, "name": str(name2)}]})
+                if qerr:
+                    last_err = f"{last_err or ''} | quote: {qerr}".strip(" |")
+
+            return jsonify({"success": True, "data": [], "warning": f"OpenBB 搜索无结果：{last_err or 'no result'}"})
+        except Exception as e:
+            return jsonify({"success": False, "error": f"OpenBB 搜索失败: {e}"}), 502
+
+    return jsonify({"success": False, "error": "该市场暂不支持"}), 400
+
+@app.route("/api/watchlist/indicators")
+def watchlist_indicators():
+    market = (request.args.get("market") or "cn").strip().lower()
+    code = (request.args.get("code") or "").strip().upper()
+    name = (request.args.get("name") or "").strip()
+    if not code:
+        return jsonify({"success": False, "error": "缺少 code"}), 400
+
+    if market == "cn":
+        import akshare as ak
+        import time as _time
+        from datetime import timedelta
+
+        today = datetime.now().strftime("%Y%m%d")
+        start = (datetime.now() - timedelta(days=220)).strftime("%Y%m%d")
+
+        df = None
+        last_err = None
+        for _ in range(3):
+            try:
+                df, err = _ob_call(lambda: ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start, end_date=today, adjust=""), timeout=15)
+                if err:
+                    last_err = err
+                    df = None
+                if df is not None and len(df) > 0:
+                    break
+            except Exception as e:
+                last_err = e
+                _time.sleep(0.3)
+
+        if df is None or len(df) <= 0:
+            return jsonify({"success": False, "error": f"获取K线失败: {last_err or 'no data'}"}), 502
+
+        close_col = "收盘" if "收盘" in df.columns else "close"
+        vol_col = "成交量" if "成交量" in df.columns else "volume"
+        closes = [to_float(x) for x in df[close_col].tolist()]
+        last_price = to_float_2(closes[-1]) if closes else None
+        prev_price = to_float_2(closes[-2]) if len(closes) > 1 else None
+        chg = round(last_price - prev_price, 2) if last_price is not None and prev_price is not None else 0
+        pct = round(chg / prev_price * 100, 2) if prev_price else 0
+        rsi_list = _calc_rsi([c for c in closes if c is not None], 14)
+        rsi14 = rsi_list[-1] if rsi_list else None
+        ma20 = to_float_2(sum([c for c in closes[-20:] if c is not None]) / min(20, len([c for c in closes[-20:] if c is not None]))) if closes else None
+        ma60 = to_float_2(sum([c for c in closes[-60:] if c is not None]) / min(60, len([c for c in closes[-60:] if c is not None]))) if closes else None
+        macd = _calc_macd_simple(closes)
+        volume = int(to_float(df[vol_col].iloc[-1]) or 0) if vol_col in df.columns else 0
+
+        return jsonify({"success": True, "data": {
+            "code": code,
+            "name": name,
+            "price": last_price,
+            "changePercent": pct,
+            "rsi14": rsi14,
+            "macdTrend": (macd or {}).get("trend"),
+            "ma20": ma20,
+            "ma60": ma60,
+            "volume": volume,
+            "provider": "akshare",
+        }})
+
+    if market == "us":
+        obb = _get_obb()
+        if not obb:
+            return jsonify({"success": False, "error": "OpenBB 不可用"}), 503
+        try:
+            sym = format_symbol(code)
+            df, err = _ob_call(lambda: obb.equity.price.historical(sym, interval="1d", provider="yfinance").to_dataframe(), timeout=20)
+            if err or df is None or (hasattr(df, "empty") and df.empty):
+                return jsonify({"success": False, "error": f"历史数据获取失败: {err or 'no data'}"}), 502
+
+            closes = [to_float(x) for x in df["close"].tolist() if x is not None]
+            last_price = to_float_2(closes[-1]) if closes else None
+            prev_price = to_float_2(closes[-2]) if len(closes) > 1 else None
+            chg = round(last_price - prev_price, 2) if last_price is not None and prev_price is not None else 0
+            pct = round(chg / prev_price * 100, 2) if prev_price else 0
+
+            rsi_list = _calc_rsi([c for c in closes if c is not None], 14)
+            rsi14 = rsi_list[-1] if rsi_list else None
+
+            def _sma(vals, n):
+                if not vals:
+                    return None
+                tail = [v for v in vals[-n:] if v is not None]
+                if not tail:
+                    return None
+                return to_float_2(sum(tail) / len(tail))
+
+            ma20 = _sma(closes, 20)
+            ma60 = _sma(closes, 60)
+            macd = _calc_macd_simple(closes)
+
+            out = {
+                "code": code,
+                "name": name,
+                "price": last_price,
+                "changePercent": pct,
+                "rsi14": rsi14,
+                "macdTrend": (macd or {}).get("trend"),
+                "ma20": ma20,
+                "ma60": ma60,
+                "provider": "openbb",
+            }
+
+            return jsonify({"success": True, "data": out})
+        except Exception as e:
+            return jsonify({"success": False, "error": f"OpenBB 指标失败: {e}"}), 502
+
+    return jsonify({"success": False, "error": "该市场暂不支持"}), 400
+
+
+# ============================================================
 # 静态文件
 # ============================================================
 @app.route("/vendor/chart.js")
@@ -2240,13 +2910,34 @@ def vendor_chartjs():
         return send_from_directory(os.path.dirname(p), "chart.umd.min.js")
     return jsonify({"error": "chart.js 未安装，请先执行 npm install"}), 404
 
+@app.route("/favicon.ico")
+def favicon():
+    resp = jsonify({})
+    resp.status_code = 204
+    try:
+        resp.headers["Cache-Control"] = "no-store"
+    except:
+        pass
+    return resp
+
 @app.route("/")
 def index():
-    return send_from_directory(".", "index.html")
+    resp = send_from_directory(".", "index.html")
+    try:
+        resp.headers["Cache-Control"] = "no-store"
+    except:
+        pass
+    return resp
 
 @app.route("/<path:path>")
 def static_files(path):
-    return send_from_directory(".", path)
+    resp = send_from_directory(".", path)
+    try:
+        if path.endswith(".js") or path.endswith(".css") or path.endswith(".html"):
+            resp.headers["Cache-Control"] = "no-store"
+    except:
+        pass
+    return resp
 
 # ============================================================
 # Entry

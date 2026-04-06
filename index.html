@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>股票智能分析系统</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="style.css?v=1">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -122,10 +123,45 @@
             </div>
         </div>
 
-        <div id="watchlistSection" class="placeholder-section hidden">
-            <div class="placeholder-card">
-                <h2>自选管理</h2>
-                <p>预留位置：后续接入自选股管理接口。</p>
+        <div id="watchlistSection" class="hidden">
+            <div class="analysis-container">
+                <div class="analysis-panel full-width">
+                    <div class="analysis-header">
+                        <h2>⭐ 自选管理</h2>
+                        <p class="analysis-subtitle">搜索股票并加入自选，展示关键技术指标</p>
+                    </div>
+
+                    <div class="watchlist-tabs">
+                        <button class="watchlist-tab active" data-market="cn" onclick="switchWatchlistMarket('cn')">A股</button>
+                        <button class="watchlist-tab" data-market="us" onclick="switchWatchlistMarket('us')">美股</button>
+                        <button class="watchlist-tab disabled" data-market="hk">港股（暂不支持）</button>
+                        <button class="watchlist-tab disabled" data-market="crypto">加密货币（暂不支持）</button>
+                    </div>
+
+                    <div class="watchlist-search-row">
+                        <input type="text" id="watchlistKeyword" class="watchlist-search-input" placeholder="输入代码或名称关键词" />
+                        <button class="btn-primary" onclick="watchlistSearch()">搜索</button>
+                        <button class="btn-secondary" onclick="refreshWatchlistIndicators()">刷新自选指标</button>
+                    </div>
+
+                    <div class="watchlist-hint" id="watchlistHint"></div>
+
+                    <div class="watchlist-results">
+                        <h3>搜索结果</h3>
+                        <div id="watchlistResultsList" class="watchlist-list"></div>
+                    </div>
+
+                    <div class="watchlist-saved">
+                        <h3>我的自选</h3>
+                        <div class="watchlist-saved-tabs">
+                            <button class="watchlist-saved-tab active" data-market="cn" onclick="switchSavedWatchlistMarket('cn')">A股</button>
+                            <button class="watchlist-saved-tab" data-market="us" onclick="switchSavedWatchlistMarket('us')">美股</button>
+                            <button class="watchlist-saved-tab disabled" data-market="hk">港股（暂不支持）</button>
+                            <button class="watchlist-saved-tab disabled" data-market="crypto">加密货币（暂不支持）</button>
+                        </div>
+                        <div id="watchlistSavedList" class="watchlist-list"></div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -396,11 +432,6 @@
                 <div id="relatedNewsList" class="related-news-list"></div>
             </div>
 
-            <div class="financial-section">
-                <h3>📊 公司财务状况</h3>
-                <div id="financialData" class="financial-content"></div>
-            </div>
-
             <div class="management-section">
                 <h3>👔 核心管理团队</h3>
                 <div id="managementData" class="management-content"></div>
@@ -456,14 +487,26 @@
         <div id="newsSection" class="hidden">
             <div class="news-header">
                 <h2>📰 实时财经新闻</h2>
-                <button class="btn-refresh" onclick="loadNews()">🔄 刷新</button>
+                <button class="btn-refresh" onclick="refreshNews()">🔄 刷新</button>
             </div>
+            <div class="news-market-tabs">
+                <button class="news-market-tab active" data-market="cn" onclick="switchNewsMarket('cn')">A股</button>
+                <button class="news-market-tab" data-market="us" onclick="switchNewsMarket('us')">美股</button>
+                <button class="news-market-tab" data-market="hk" onclick="switchNewsMarket('hk')">港股</button>
+                <button class="news-market-tab" data-market="crypto" onclick="switchNewsMarket('crypto')">加密货币</button>
+            </div>
+            <div class="news-search-row">
+                <input type="text" id="newsKeyword" class="news-search-input" placeholder="搜索关键词（默认搜索当天新闻）" />
+                <button class="btn-refresh" onclick="searchNews()">搜索</button>
+            </div>
+            <div class="news-pagination" id="newsPaginationTop"></div>
             <div id="newsList" class="news-list">
                 <div class="loading">
                     <div class="spinner"></div>
                     <p>正在加载新闻...</p>
                 </div>
             </div>
+            <div class="news-pagination" id="newsPaginationBottom"></div>
         </div>
 
         <div id="diarySection" class="hidden">
@@ -1233,6 +1276,6 @@
         </main>
     </div>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=1"></script>
 </body>
 </html>
