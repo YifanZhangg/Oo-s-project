@@ -1,1 +1,1 @@
-web: python server_akshare.py
+web: python server.py

@@ -10,4 +10,4 @@ COPY . .
 
 EXPOSE 3000
 
-CMD ["python", "server_akshare.py"]
+CMD ["python", "server.py"]

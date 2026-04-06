@@ -3,6 +3,8 @@ flask-cors
 requests
 akshare
 pandas
-qrcode[pil]
-pillow
+dashscope
+yfinance
+openbb
+openbb[all]
 gunicorn

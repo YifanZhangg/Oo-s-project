@@ -10,5 +10,5 @@
       "HostPort": "80"
     }
   ],
-  "Command": "python server_akshare.py"
+  "Command": "python server.py"
 }
